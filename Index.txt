@@ -1,0 +1,494 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Attendance Logger</title>
+
+  <!-- PWA bits -->
+  <link rel="manifest" href="manifest.webmanifest">
+  <meta name="theme-color" content="#111111" />
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <link rel="apple-touch-icon" href="icons/icon-192.png"> <!-- optional; iOS will screenshot if missing -->
+
+  <style>
+    :root {
+      --bg: #0f1115;
+      --panel: #181a20;
+      --text: #e8e8ea;
+      --muted: #a4a6ad;
+      --accent: #4f8cff;
+      --ok: #2ecc71;
+      --warn: #f39c12;
+      --danger: #e74c3c;
+      --border: #2a2d35;
+      --chip:#23262e;
+    }
+    @media (prefers-color-scheme: light) {
+      :root {
+        --bg: #fafbfe;
+        --panel: #ffffff;
+        --text: #0f1115;
+        --muted: #5a5f6a;
+        --accent: #2d6bff;
+        --ok: #1ea85a;
+        --warn: #c67c0a;
+        --danger: #c73b34;
+        --border: #e9ecf2;
+        --chip: #f3f5f9;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial, "Apple Color Emoji", "Segoe UI Emoji";
+      background: var(--bg); color: var(--text);
+    }
+    header {
+      position: sticky; top: 0; z-index: 5;
+      background: linear-gradient(180deg, var(--bg), rgba(0,0,0,0));
+      padding: env(safe-area-inset-top) 16px 12px 16px;
+    }
+    .container { padding: 12px 16px 32px 16px; max-width: 820px; margin: 0 auto; }
+    h1 { font-size: 22px; margin: 8px 0 10px; }
+    .grid {
+      display: grid; gap: 10px;
+      grid-template-columns: repeat(4, 1fr);
+    }
+    .btn {
+      border: 1px solid var(--border);
+      background: var(--panel);
+      padding: 12px 10px; border-radius: 12px;
+      font-weight: 600; text-align: center; cursor: pointer;
+      transition: transform .04s ease, border-color .2s ease;
+      user-select: none;
+    }
+    .btn:active { transform: translateY(1px) scale(0.99); }
+    .btn[data-type="Office"] { border-color: var(--accent); }
+    .btn[data-type="WFH"] { border-color: var(--ok); }
+    .btn[data-type="Holiday"] { border-color: var(--warn); }
+    .btn[data-type="Site"] { border-color: var(--danger); }
+
+    .card {
+      border: 1px solid var(--border);
+      background: var(--panel); border-radius: 16px; padding: 14px;
+    }
+    label { display:block; font-size: 13px; color: var(--muted); margin: 8px 0 6px;}
+    input, select, textarea {
+      width: 100%; padding: 10px 12px; border-radius: 10px;
+      border: 1px solid var(--border); background: var(--chip); color: var(--text);
+      outline: none;
+    }
+    textarea { min-height: 64px; resize: vertical; }
+    .row { display:flex; gap: 10px; }
+    .row > * { flex: 1; }
+
+    .toolbar { display:flex; gap: 8px; align-items:center; justify-content: space-between; flex-wrap: wrap; }
+    .chip {
+      display:inline-flex; align-items:center; gap:6px;
+      background: var(--chip); border: 1px solid var(--border); border-radius: 999px;
+      padding: 8px 12px; font-size: 13px;
+    }
+    .table { width:100%; border-collapse: collapse; }
+    .table th, .table td {
+      border-bottom: 1px solid var(--border); padding: 10px 6px; text-align:left; vertical-align: top;
+      font-size: 14px;
+    }
+    .table th { color: var(--muted); font-weight: 600; }
+    .row-actions button {
+      background: transparent; border: 1px solid var(--border); color: var(--text);
+      padding: 6px 10px; border-radius: 8px; cursor: pointer;
+    }
+    .footer-space { height: max(20px, env(safe-area-inset-bottom)); }
+    .small { font-size: 12px; color: var(--muted); }
+    .totals { display:flex; gap: 8px; flex-wrap: wrap; }
+    .totals .chip { font-weight:600; }
+  </style>
+</head>
+<body>
+  <header class="container">
+    <h1>Attendance Logger</h1>
+    <div class="grid">
+      <button class="btn" data-type="Office">Office</button>
+      <button class="btn" data-type="WFH">WFH</button>
+      <button class="btn" data-type="Holiday">Holiday</button>
+      <button class="btn" data-type="Site">Site Visit</button>
+    </div>
+  </header>
+
+  <main class="container">
+    <section class="card" id="details">
+      <div class="row">
+        <div>
+          <label for="date">Date</label>
+          <input type="date" id="date">
+        </div>
+        <div>
+          <label for="time">Time</label>
+          <input type="time" id="time">
+        </div>
+      </div>
+
+      <label for="notes">Notes (optional)</label>
+      <textarea id="notes" placeholder="e.g., Team meeting 10am"></textarea>
+
+      <div class="row" style="margin-top:8px;">
+        <button id="loc-btn" class="btn" style="flex:1;border-color:var(--accent);">Add Location</button>
+        <button id="save-btn" class="btn" style="flex:1;">Save Entry</button>
+      </div>
+      <div id="loc-preview" class="small" style="margin-top:6px;"></div>
+    </section>
+
+    <section style="height:8px;"></section>
+
+    <section class="card">
+      <div class="toolbar">
+        <div class="row" style="gap:8px; flex: 1;">
+          <label class="chip" for="month">Month
+            <input type="month" id="month" style="margin-left:8px; background:transparent; border:none; padding:0; width:auto;">
+          </label>
+          <button id="clear-filter" class="chip">Clear Filter</button>
+        </div>
+        <div class="row" style="gap:8px;">
+          <button id="export-btn" class="chip">Export CSV</button>
+          <button id="import-btn" class="chip">Import CSV</button>
+          <input id="file-input" type="file" accept=".csv,text/csv" style="display:none;">
+        </div>
+      </div>
+
+      <div class="totals" id="totals" style="margin-top:10px;"></div>
+
+      <div style="overflow:auto; margin-top:8px;">
+        <table class="table" id="table">
+          <thead>
+            <tr>
+              <th>Type</th>
+              <th>Date</th>
+              <th>Time</th>
+              <th>Notes</th>
+              <th>Location</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="tbody"></tbody>
+        </table>
+      </div>
+      <div class="small" style="margin-top:10px;">
+        Data is stored locally on this device (localStorage). You can export/import CSV anytime.
+      </div>
+    </section>
+
+    <div class="footer-space"></div>
+  </main>
+
+  <script>
+    // ---- PWA service worker registration ----
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('./sw.js').catch(console.error);
+      });
+    }
+
+    // ---- Simple store (localStorage) ----
+    const KEY = 'attendance.v1';
+    const load = () => JSON.parse(localStorage.getItem(KEY) || '[]');
+    const save = (data) => localStorage.setItem(KEY, JSON.stringify(data));
+
+    // ---- UI elements ----
+    const dateEl = document.getElementById('date');
+    const timeEl = document.getElementById('time');
+    const notesEl = document.getElementById('notes');
+    const saveBtn = document.getElementById('save-btn');
+    const locBtn = document.getElementById('loc-btn');
+    const locPreview = document.getElementById('loc-preview');
+    const monthEl = document.getElementById('month');
+    const clearFilterBtn = document.getElementById('clear-filter');
+    const tbody = document.getElementById('tbody');
+    const totalsEl = document.getElementById('totals');
+    const exportBtn = document.getElementById('export-btn');
+    const importBtn = document.getElementById('import-btn');
+    const fileInput = document.getElementById('file-input');
+
+    let pendingType = 'Office';
+    let pendingLocation = null; // {lat, lon, accuracy}
+
+    // default date/time now (local)
+    const now = new Date();
+    dateEl.value = new Date(now.getTime() - now.getTimezoneOffset()*60000).toISOString().slice(0,10);
+    timeEl.value = now.toTimeString().slice(0,5);
+
+    // quick type buttons
+    document.querySelectorAll('.btn[data-type]').forEach(b=>{
+      b.addEventListener('click', () => {
+        pendingType = b.dataset.type;
+        flash(b);
+      });
+    });
+
+    // location
+    locBtn.addEventListener('click', async () => {
+      if (!navigator.geolocation) {
+        alert('Geolocation not supported on this device/browser.');
+        return;
+      }
+      locBtn.disabled = true;
+      locBtn.textContent = 'Getting location…';
+      navigator.geolocation.getCurrentPosition(pos=>{
+        const {latitude, longitude, accuracy} = pos.coords;
+        pendingLocation = {lat: latitude, lon: longitude, accuracy: Math.round(accuracy)};
+        locPreview.textContent = `📍 ${latitude.toFixed(5)}, ${longitude.toFixed(5)} (±${Math.round(accuracy)}m)`;
+        locBtn.textContent = 'Update Location';
+        locBtn.disabled = false;
+      }, err=>{
+        alert('Could not get location: ' + err.message);
+        locBtn.textContent = 'Add Location';
+        locBtn.disabled = false;
+      }, {enableHighAccuracy: true, maximumAge: 60000, timeout: 10000});
+    });
+
+    // save entry
+    saveBtn.addEventListener('click', () => {
+      const date = dateEl.value;
+      const time = timeEl.value;
+      if (!date) return alert('Please choose a date.');
+      const list = load();
+      const id = cryptoRandomId();
+      list.push({
+        id,
+        type: pendingType,
+        date,
+        time: time || '',
+        notes: notesEl.value.trim(),
+        location: pendingLocation,
+        createdAt: new Date().toISOString()
+      });
+      save(list);
+      notesEl.value = '';
+      render();
+      toast('Saved ✔');
+    });
+
+    // month filter
+    monthEl.addEventListener('change', render);
+    clearFilterBtn.addEventListener('click', ()=>{ monthEl.value=''; render(); });
+
+    // export CSV
+    exportBtn.addEventListener('click', () => {
+      const rows = toCSV(load());
+      const blob = new Blob([rows], {type:'text/csv'});
+      const url = URL.createObjectURL(blob);
+
+      // Try Web Share first (nice on iOS)
+      if (navigator.share && navigator.canShare && navigator.canShare({files:[new File([blob],'attendance.csv', {type:'text/csv'})]})) {
+        const file = new File([blob], 'attendance.csv', {type:'text/csv'});
+        navigator.share({ files:[file], title:'Attendance Export', text:'CSV export from Attendance Logger' })
+          .catch(()=>{ /* user cancelled */ });
+      } else {
+        const a = document.createElement('a');
+        a.href = url; a.download = 'attendance.csv';
+        document.body.appendChild(a); a.click(); a.remove();
+        URL.revokeObjectURL(url);
+      }
+    });
+
+    // import CSV
+    importBtn.addEventListener('click', ()=> fileInput.click());
+    fileInput.addEventListener('change', async (e)=>{
+      const file = e.target.files[0];
+      if (!file) return;
+      const text = await file.text();
+      const incoming = parseCSV(text);
+      // keep existing + merge by new ids
+      const existing = load();
+      const merged = existing.concat(incoming.map(r=>({...r, id: cryptoRandomId()})));
+      save(merged);
+      render();
+      toast('Imported ✔');
+      fileInput.value = '';
+    });
+
+    // helpers
+    function render() {
+      const list = load().sort((a,b)=> (a.date + ' ' + a.time).localeCompare(b.date + ' ' + b.time));
+      const month = monthEl.value; // YYYY-MM
+      const filtered = month ? list.filter(x => x.date.startsWith(month)) : list;
+
+      // totals
+      const counts = {Office:0, WFH:0, Holiday:0, Site:0};
+      filtered.forEach(x => counts[x.type] = (counts[x.type]||0) + 1);
+      totalsEl.innerHTML = '';
+      Object.entries(counts).forEach(([k,v])=>{
+        const el = document.createElement('div');
+        el.className = 'chip';
+        el.textContent = `${k}: ${v}`;
+        totalsEl.appendChild(el);
+      });
+      const totalEl = document.createElement('div');
+      totalEl.className = 'chip';
+      totalEl.textContent = `Total: ${filtered.length}`;
+      totalsEl.appendChild(totalEl);
+
+      // table
+      tbody.innerHTML = '';
+      filtered.forEach(item=>{
+        const tr = document.createElement('tr');
+
+        const tdType = document.createElement('td'); tdType.textContent = item.type; tr.appendChild(tdType);
+        const tdDate = document.createElement('td'); tdDate.textContent = item.date; tr.appendChild(tdDate);
+        const tdTime = document.createElement('td'); tdTime.textContent = item.time || '—'; tr.appendChild(tdTime);
+        const tdNotes = document.createElement('td'); tdNotes.textContent = item.notes || ''; tr.appendChild(tdNotes);
+        const tdLoc = document.createElement('td');
+        if (item.location) {
+          const {lat, lon, accuracy} = item.location;
+          const a = document.createElement('a');
+          a.href = `https://maps.apple.com/?ll=${lat},${lon}&q=Logged%20Location`;
+          a.target = '_blank';
+          a.rel = 'noopener';
+          a.textContent = `${lat.toFixed(5)}, ${lon.toFixed(5)} (±${accuracy}m)`;
+          tdLoc.appendChild(a);
+        } else tdLoc.textContent = '';
+        tr.appendChild(tdLoc);
+
+        const tdActions = document.createElement('td'); tdActions.className = 'row-actions';
+        const edit = document.createElement('button'); edit.textContent = 'Edit';
+        edit.addEventListener('click', ()=> editRow(item.id));
+        const del = document.createElement('button'); del.textContent = 'Delete';
+        del.addEventListener('click', ()=> deleteRow(item.id));
+        tdActions.appendChild(edit); tdActions.appendChild(del);
+        tr.appendChild(tdActions);
+
+        tbody.appendChild(tr);
+      });
+    }
+
+    function editRow(id) {
+      const list = load();
+      const row = list.find(x=>x.id===id);
+      if (!row) return;
+
+      const type = prompt('Type (Office, WFH, Holiday, Site)', row.type) || row.type;
+      const date = prompt('Date (YYYY-MM-DD)', row.date) || row.date;
+      const time = prompt('Time (HH:MM, optional)', row.time) || row.time;
+      const notes = prompt('Notes (optional)', row.notes || '') ?? row.notes;
+
+      row.type = normType(type);
+      row.date = date;
+      row.time = time;
+      row.notes = notes;
+
+      save(list);
+      render();
+    }
+
+    function deleteRow(id) {
+      if (!confirm('Delete this entry?')) return;
+      const list = load().filter(x=>x.id!==id);
+      save(list);
+      render();
+    }
+
+    function normType(t) {
+      const s = String(t||'').trim().toLowerCase();
+      if (s.startsWith('off')) return 'Office';
+      if (s==='wfh' || s.startsWith('home')) return 'WFH';
+      if (s.startsWith('hol')) return 'Holiday';
+      return 'Site';
+    }
+
+    function toCSV(rows) {
+      const header = ['id','type','date','time','notes','lat','lon','accuracy','createdAt'];
+      const lines = [header.join(',')];
+      rows.forEach(r=>{
+        const lat = r.location?.lat ?? '';
+        const lon = r.location?.lon ?? '';
+        const acc = r.location?.accuracy ?? '';
+        const line = [
+          r.id,
+          esc(r.type),
+          r.date,
+          r.time || '',
+          esc(r.notes||''),
+          lat, lon, acc,
+          r.createdAt||''
+        ].join(',');
+        lines.push(line);
+      });
+      return lines.join('\n');
+    }
+
+    function parseCSV(text) {
+      // very simple CSV parser for the specific header; notes may contain commas if quoted
+      const lines = text.trim().split(/\r?\n/);
+      const out = [];
+      const header = lines.shift() || '';
+      const cols = header.split(',');
+      const idx = Object.fromEntries(cols.map((c,i)=>[c,i]));
+      for (const line of lines) {
+        const cells = splitCSV(line);
+        const get = (k) => cells[idx[k]] ?? '';
+        const lat = parseFloat(get('lat')); const lon = parseFloat(get('lon')); const acc = parseFloat(get('accuracy'));
+        out.push({
+          // id will be replaced on import
+          type: get('type'),
+          date: get('date'),
+          time: get('time'),
+          notes: unesc(get('notes')),
+          location: (!isNaN(lat) && !isNaN(lon)) ? {lat, lon, accuracy: isNaN(acc)?undefined:acc} : null,
+          createdAt: get('createdAt') || new Date().toISOString()
+        });
+      }
+      return out;
+    }
+
+    function splitCSV(line) {
+      const out = []; let cur = ''; let q = false;
+      for (let i=0;i<line.length;i++) {
+        const c = line[i];
+        if (c === '"' ) {
+          if (q && line[i+1] === '"') { cur += '"'; i++; }
+          else q = !q;
+        } else if (c === ',' && !q) {
+          out.push(cur); cur = '';
+        } else cur += c;
+      }
+      out.push(cur);
+      return out;
+    }
+
+    function esc(s) {
+      if (s == null) return '';
+      const needs = /[",\n]/.test(String(s));
+      return needs ? '"' + String(s).replace(/"/g,'""') + '"' : String(s);
+    }
+    function unesc(s) {
+      s = String(s||'');
+      if (s.startsWith('"') && s.endsWith('"')) s = s.slice(1,-1).replace(/""/g,'"');
+      return s;
+    }
+
+    function flash(el) {
+      el.style.transform = 'scale(0.98)';
+      setTimeout(()=> el.style.transform='', 80);
+    }
+    function toast(msg) {
+      const t = document.createElement('div');
+      t.textContent = msg;
+      t.style.position='fixed'; t.style.left='50%'; t.style.bottom= 'calc(20px + env(safe-area-inset-bottom))';
+      t.style.transform='translateX(-50%)'; t.style.padding='10px 14px'; t.style.background='var(--panel)'; t.style.border='1px solid var(--border)';
+      t.style.borderRadius='999px'; t.style.zIndex='999'; t.style.boxShadow='0 6px 20px rgba(0,0,0,.25)';
+      document.body.appendChild(t);
+      setTimeout(()=> t.remove(), 1200);
+    }
+    function cryptoRandomId() {
+      if (window.crypto?.getRandomValues) {
+        const b = new Uint8Array(16); crypto.getRandomValues(b);
+        return [...b].map(x=>x.toString(16).padStart(2,'0')).join('');
+      }
+      return 'id-' + Math.random().toString(36).slice(2);
+    }
+
+    // initial render
+    render();
+  </script>
+</body>
+</html>
